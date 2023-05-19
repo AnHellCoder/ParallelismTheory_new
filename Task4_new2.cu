@@ -4,8 +4,6 @@
 
 using namespace std;
 
-#define MAXIMUM_THREADS_PER_BLOCK 32
-
 //Print when incorrect args sent
 void print_error(){
 	cout << "Arguments were not parsed correctly!" << endl;
@@ -65,13 +63,8 @@ __global__ void printArr(double* arr, int size){
 	}
 }
 
-__global__ void crutch(double* arrloss, int size){
-	for(int i = 0; i < size; i++){
-		for(int j = 0; j < size; j++) arrloss[i * size + j] = 1;
-	}
-}
-
 int main(int argc, char* argv[]){
+	//Initialization
 	clock_t begin = clock();
 
 	cudaSetDevice(3);
@@ -79,6 +72,7 @@ int main(int argc, char* argv[]){
 	double acc, loss = 1.0;
 	int iter = 0, lim, size;
 
+	//Arguments preprocessing
 	if(argc == 2 && string(argv[1]) == "--help"){
 		print_help();
 		exit(0);
@@ -102,11 +96,13 @@ int main(int argc, char* argv[]){
 		exit(0);
 	}
 
+	//Initialization of graph parameters
 	cudaStream_t stream;
         cudaStreamCreate(&stream);
         cudaGraph_t graph;
         cudaGraphExec_t graph_instance;
 
+	//Array initialization
 	double* arrprev, *arrnew, *arrloss, *cudaLoss, *temp_storage = NULL;
 	size_t tsbytes = 0;
 
@@ -118,10 +114,10 @@ int main(int argc, char* argv[]){
 	init<<<1, 1>>>(arrprev, size);
 	init<<<1, 1>>>(arrnew, size);
 
-	//cudaMalloc(&temp_storage, tsbytes);
 	//////////////////////////////////////////////////////////Begin of the graph
 	cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
 
+	//Start of computations
 	for(int i = 0; i < 100; i++){
 		compute<<<size, size, 0, stream>>>(arrnew, arrprev, size);
 		if(i < 99) swap(arrprev, arrnew);
@@ -133,6 +129,7 @@ int main(int argc, char* argv[]){
         cudaGraphInstantiate(&graph_instance, graph, NULL, NULL, 0);
 	//////////////////////////////////////////////////////////End of the graph
 
+	//Main loop
 	while(loss > acc && iter <= lim){
 		cudaGraphLaunch(graph_instance, stream);
 		cudaMalloc(&temp_storage, tsbytes);

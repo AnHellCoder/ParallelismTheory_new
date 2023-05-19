@@ -4,6 +4,8 @@
 
 using namespace std;
 
+#define MAXIMUM_THREADS_PER_BLOCK 32
+
 //Print when incorrect args sent
 void print_error(){
 	cout << "Arguments were not parsed correctly!" << endl;
@@ -29,6 +31,10 @@ __global__ void init(double* arr, int size){
 		arr[k * size + i] = arr[k * size + (i - 1)] + step;
 		arr[i * size] = arr[(i - 1) * size] + step;
 		arr[i * size + k] = arr[(i - 1) * size + k] + step;
+	}
+
+	for(int i = 1; i < size - 1; i++){
+		for(int j = 1; j < size - 1; j++) arr[i * size + j] = 0;
 	}
 }
 
@@ -56,6 +62,12 @@ __global__ void printArr(double* arr, int size){
 			printf("%.2f ", arr[i * size + j]);
 		}
 		printf("\n");
+	}
+}
+
+__global__ void crutch(double* arrloss, int size){
+	for(int i = 0; i < size; i++){
+		for(int j = 0; j < size; j++) arrloss[i * size + j] = 1;
 	}
 }
 
@@ -95,28 +107,27 @@ int main(int argc, char* argv[]){
         cudaGraph_t graph;
         cudaGraphExec_t graph_instance;
 
-	double* arrprev, *arrnew, *arrloss, *cudaLoss, *temp_storage;
+	double* arrprev, *arrnew, *arrloss, *cudaLoss, *temp_storage = NULL;
 	size_t tsbytes = 0;
 
 	cudaMalloc(&arrprev, sizeof(double) * (size * size));
 	cudaMalloc(&arrnew, sizeof(double) * (size * size));
 	cudaMalloc(&arrloss, sizeof(double) * (size * size));
-	//cudaMalloc(&cudaLoss, sizeof(double));
+	cudaMalloc(&cudaLoss, sizeof(double));
 
 	init<<<1, 1>>>(arrprev, size);
 	init<<<1, 1>>>(arrnew, size);
 
-	cudaMalloc(&temp_storage, tsbytes);
-
+	//cudaMalloc(&temp_storage, tsbytes);
 	//////////////////////////////////////////////////////////Begin of the graph
 	cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+
 	for(int i = 0; i < 100; i++){
 		compute<<<size, size, 0, stream>>>(arrnew, arrprev, size);
-		swap(arrprev, arrnew);
+		if(i < 99) swap(arrprev, arrnew);
 	}
 	loss_calculate<<<size, size, 0, stream>>>(arrnew, arrprev, arrloss);
 	cub::DeviceReduce::Max(temp_storage, tsbytes, arrloss, cudaLoss, (size * size), stream);
-	//cudaMemcpyAsync(&loss, cudaLoss, sizeof(double), cudaMemcpyDeviceToHost);
 
 	cudaStreamEndCapture(stream, &graph);
         cudaGraphInstantiate(&graph_instance, graph, NULL, NULL, 0);
@@ -124,7 +135,10 @@ int main(int argc, char* argv[]){
 
 	while(loss > acc && iter <= lim){
 		cudaGraphLaunch(graph_instance, stream);
-		cudaMemcpyAsync(&loss, cudaLoss, sizeof(double), cudaMemcpyDeviceToHost);
+		cudaMalloc(&temp_storage, tsbytes);
+		cub::DeviceReduce::Max(temp_storage, tsbytes, arrloss, cudaLoss, (size * size), stream);
+
+		cudaMemcpy(&loss, cudaLoss, sizeof(double), cudaMemcpyDeviceToHost);
 
 		clock_t mid = clock();
 		double te = (double)(mid - begin)/CLOCKS_PER_SEC;
